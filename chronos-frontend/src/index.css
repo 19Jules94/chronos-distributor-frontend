@@ -11,3 +11,49 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+
+/* 1) Evita overflow horizontal del documento */
+html, body, #root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* 2) Evita que cualquier cálculo de ancho se salga por padding/border */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* 3) Neutraliza el padding-right que dejan algunos lockers de scroll */
+body {
+  padding-right: 0 !important;
+}
+
+/* 4) Estabiliza el layout con scrollbars (evita “bailes” de ancho) */
+:root {
+  /* Soporta Chrome/Edge/Firefox modernos */
+  scrollbar-gutter: stable;           /* o: stable both-edges */
+}
+
+/* 5) Por si algún contenido usa 100vw (causa típica de overflow) */
+.fix-viewport,
+.MuiContainer-root,
+.MuiPaper-root {
+  max-width: 100%;
+}
+
+/* 6) DataGrid: asegura que no imponga un min-width que empuje el viewport */
+.MuiDataGrid-root {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden; /* cinturón de seguridad */
+}
+
+/* 7) Medios que a veces se salen del contenedor */
+img, video, canvas, svg {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
