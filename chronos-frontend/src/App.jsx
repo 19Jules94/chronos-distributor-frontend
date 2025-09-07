@@ -1,8 +1,7 @@
 import React, { useState, Suspense } from "react";
 import { AppBar, Toolbar, Typography, Box, Paper } from "@mui/material";
 import Sidebar from "./components/Sidebar.jsx";
-import Calen from "./components/Calendario.jsx";
-import CalenEdit from "./components/Calendario-edit.jsx";
+import CursosEscolares from "./components/CursosEscolares.jsx";
 
 // Carga perezosa de vistas (opcional pero recomendado)
 const Usuarios = React.lazy(() => import("./components/Usuarios.jsx"));
@@ -33,6 +32,14 @@ export default function App() {
             <CalendarioEdit />
           </Suspense>
         )
+        case "curso-gestion":
+        return (
+          <Suspense>
+            <CursosEscolares />
+          </Suspense>
+        )
+
+        gestion
       
       default:
         return <Paper sx={{ p: 3 }}>Bienvenido 👋</Paper>;

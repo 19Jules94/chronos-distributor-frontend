@@ -107,9 +107,7 @@ export function contCategory(listDaysGuard) {
     acc + ((d.weekday === 4) && d.no_lectivo === false ? 1 : 0), 0);
   out.push({ day: 'viernes', cont_day: cntVie });
 
-  // Domingo/Festivo (noche):
-  // - fin de semana (sábado=5, domingo=6)
-  // - o festivo (no_lectivo=true) distinto de viernes (weekday != 4)
+  // Domingo/Festivo (noche): sáb/dom o festivo != viernes
   const cntDomFest = listDaysGuard.reduce((acc, d) =>
     acc + (
       d.guardia === true &&
@@ -120,7 +118,7 @@ export function contCategory(listDaysGuard) {
     ), 0);
   out.push({ day: 'domingo_festivo', cont_day: cntDomFest });
 
-  // Sumar +1 a la categoría del primer día del rango (doble guardia)
+  // +1 a la categoría del primer día del rango (doble guardia)
   if (listDaysGuard.length > 0) {
     const firstName = getWeekdayName(listDaysGuard[0].weekday);
     const row = out.find(r => r.day === firstName);
@@ -165,23 +163,44 @@ export function distributionDays(categorias, N_EMP = 13) {
   return empleados;
 }
 
-// ============================ RNG (semilla opcional) =======================
-// Determinista y rápido. Si necesitas paridad *exacta* con Python random.Random,
-// podemos cambiar a Mersenne Twister seed-compatible.
-function mulberry32(seed) {
-  return function() {
-    let t = (seed += 0x6d2b79f5);
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+// ============================ RNG (Mersenne Twister) =======================
+// Implementación simple MT19937 para acercarnos a random.Random de Python
+class MT19937 {
+  constructor(seed) {
+    this.mt = new Array(624);
+    this.index = 624;
+    this.mt[0] = seed >>> 0;
+    for (let i = 1; i < 624; i++) {
+      const x = this.mt[i - 1] ^ (this.mt[i - 1] >>> 30);
+      this.mt[i] = (((0x6c078965 * (x >>> 0)) >>> 0) + i) >>> 0;
+    }
+  }
+  twist() {
+    for (let i = 0; i < 624; i++) {
+      const y = (this.mt[i] & 0x80000000) + (this.mt[(i + 1) % 624] & 0x7fffffff);
+      this.mt[i] = (this.mt[(i + 397) % 624] ^ (y >>> 1)) >>> 0;
+      if (y & 1) this.mt[i] = (this.mt[i] ^ 0x9908b0df) >>> 0;
+    }
+    this.index = 0;
+  }
+  nextUint32() {
+    if (this.index >= 624) this.twist();
+    let y = this.mt[this.index++];
+    y ^= y >>> 11;
+    y ^= (y << 7) & 0x9d2c5680;
+    y ^= (y << 15) & 0xefc60000;
+    y ^= y >>> 18;
+    return y >>> 0;
+  }
+  random() { return this.nextUint32() / 4294967296; }
 }
 function makeRng(seed) {
   if (seed === undefined || seed === null) return Math.random;
   const s = typeof seed === 'number'
     ? seed
     : Array.from(String(seed)).reduce((a, c) => a + c.charCodeAt(0), 0);
-  return mulberry32(s >>> 0);
+  const mt = new MT19937((s >>> 0) || 1);
+  return () => mt.random();
 }
 function shuffleInPlace(arr, rng) {
   for (let i = arr.length - 1; i > 0; i--) {
@@ -220,7 +239,7 @@ export function assignTurn(listDaysGuard, listAsignacion, seed = null) {
   }
 
   function categoriaNoche(d) {
-    // Igual que en Python (FIX: sábado y domingo también)
+    // Igual que en Python: festivo o fin de semana => domingo_festivo
     if (d.no_lectivo === true || d.weekday === 5 || d.weekday === 6) return 'domingo_festivo';
     return ['lunes','martes','miercoles','jueves'][d.weekday]; // 0..3
   }
@@ -247,14 +266,14 @@ export function assignTurn(listDaysGuard, listAsignacion, seed = null) {
       const usados = new Set();
 
       for (let s = 0; s < slots; s++) {
-        // candidatos: resto>0, descanso>=2, no repetido en la misma noche
+        // candidatos: resto>0, descanso > 2 días, no repetido en la misma noche
         let candidatos = ids.filter(cid => {
           const e = empleados.get(cid);
-          return (e.resto[cat] > 0) && (diasEntre(e.ultima_noche_iso, hoy_iso) >= 2) && !usados.has(cid);
+          return (e.resto[cat] > 0) && (diasEntre(e.ultima_noche_iso, hoy_iso) > 2) && !usados.has(cid);
         });
 
         if (candidatos.length === 0) {
-          throw new Error(`No hay candidatos para ${hoy_iso} (${cat}) respetando descanso/cupos`);
+          alert(`No hay candidatos para ${hoy_iso} (${cat}) respetando descanso/cupos, debes añadir más usuarios`);
         }
 
         // desempate: shuffle + ordenar por (-resto[cat], total_noches)
@@ -283,9 +302,14 @@ export function assignTurn(listDaysGuard, listAsignacion, seed = null) {
 
     // --- VIERNES LECTIVO (día) ---
     if (d.weekday === 4 && d.no_lectivo === false) {
-      const ayer_iso = ymd(addDays(fromYmd(hoy_iso), -1));
-      let candidatos = ids.filter(cid => empleados.get(cid).ultima_noche_iso !== ayer_iso);
-      if (candidatos.length === 0) candidatos = [...ids]; // relajación opcional
+      const ayer_iso = ymd(addDays(fromYmd(hoy_iso), -1)); 
+      const anteayer_iso = ymd(addDays(fromYmd(hoy_iso), -2));
+
+      let candidatos = ids.filter(cid => {
+        const last = empleados.get(cid).ultima_noche_iso;
+        return last !== ayer_iso && last !== anteayer_iso;
+      });
+      if (candidatos.length === 0) candidatos = [...ids]; 
 
       shuffleInPlace(candidatos, rng);
       candidatos.sort((a, b) =>
@@ -325,7 +349,7 @@ export function buildEventsFromAssignments(dias) {
     }
     // Viernes (día)
     if (d.weekday === 4 && d.no_lectivo === false) {
-      const diaOnly = d.empleados?.filter(e => e)?.slice(-1)[0]; // el último añadido es el del viernes día
+      const diaOnly = d.empleados?.filter(e => e)?.slice(-1)[0]; 
       if (diaOnly) {
         const n = empToTurnoNum(diaOnly);
         out.push({
@@ -371,7 +395,7 @@ export function contarTurnos(dias) {
     const emps = empleadosDelDia(d);
     if (!emps || emps.length === 0) continue;
 
-    // Viernes (día)
+    // Viernes (día): igual que en Python, cuenta si weekday==4 (sin mirar lectivo)
     if (d.weekday === 4) {
       for (const emp of emps) {
         ensure(emp);
@@ -410,8 +434,7 @@ export function buildBulkPayloadFromAssignments(dias) {
         if (n) out.push({ fecha: iso, turnoAsignado: n });
       }
     }
-    // viernes (día) ya va en d.empleados como último añadido; si quisieras
-    // enviar también viernes como slot de día, puedes tratarlo aparte.
+    // viernes (día) no se envía como turno nocturno; si quieres enviarlo, trata aquí aparte.
   }
   // deduplicar exactos
   const seen = new Set();
@@ -423,7 +446,6 @@ export function buildBulkPayloadFromAssignments(dias) {
   return uniq;
 }
 
-// ============================== API ALTO NIVEL ============================
 /**
  * Flujo Python:
  *  1) collectDaysBetweenInclusive
